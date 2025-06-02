@@ -1,0 +1,786 @@
+const canvas = document.getElementById("gameCanvas"); 
+const ctx = canvas.getContext("2d"); 
+
+// Элементы интерфейса
+const startScreen = document.getElementById("startScreen"); 
+const gameOverScreen = document.getElementById("gameOverScreen"); 
+const startBtn = document.getElementById("startBtn"); 
+const restartBtn = document.getElementById("restartBtn"); 
+const difficultyButtons = document.querySelectorAll(".difficulty-btn"); 
+
+// Изображения
+const birdImage = new Image();
+const background = new Image();
+const pipeImage = new Image();
+const coinImage = new Image();
+
+// Звуки
+const jumpSound = new Audio("sounds/jump.mp3");
+const coinSound = new Audio("sounds/coin.mp3");
+const shieldSound = new Audio("sounds/shield.mp3");
+
+// Основные переменные игры
+let difficulty = "normal";
+let bird, pipes, gravity, isGameRunning, frameCount, score;
+let highScore = 0;
+let coinsCollected = 0;
+const COINS_FOR_BONUS = 10;
+let selectedSkin = 1; // Выбранный скин птицы
+
+// Настройки труб
+let pipeSpeed = 3;
+let pipeInterval = 90;
+let pipeGap = 200;
+
+// Эффекты
+let bgX = 0; // Позиция фона для анимации
+let particles = []; // Массив частиц для эффектов
+let trailParticles = []; // Массив частиц следа
+
+// Физика птицы
+let lastJumpTime = 0;
+let jumpCooldown = 100;
+let maxVelocity = 15;
+let smoothRotation = true;
+let rotationSpeed = 0.1;
+
+// Щит
+let shieldActive = false;
+let shieldTime = 0;
+const SHIELD_DURATION = 5000;
+const SHIELD_COOLDOWN = 10000;
+let shieldCooldown = 0;
+let shieldTextScale = 1;
+
+// Монетки
+const COIN_SPAWN_CHANCE = 0.4;
+const COIN_VALUE = 5;
+
+// Флаги загрузки изображений
+let birdImageLoaded = false;
+let pipeImageLoaded = false;
+let coinImageLoaded = false;
+
+// Настройка обработчиков загрузки изображений
+birdImage.onload = () => birdImageLoaded = true;
+pipeImage.onload = () => pipeImageLoaded = true;
+coinImage.onload = () => coinImageLoaded = true;
+
+/**
+ * Загружает изображение птицы в зависимости от выбранного скина
+ */
+function loadBirdSkin() {
+  switch (selectedSkin) {
+    case 1:
+      birdImage.src = "resourses/bird1.png";
+      break;
+    case 2:
+      birdImage.src = "resourses/bird2.png";
+      break;
+    case 3:
+      birdImage.src = "resourses/bird3.png";
+      break;
+  }
+}
+
+// Загрузка остальных изображений
+background.src = "resourses/background.jpg"; 
+pipeImage.src = "resourses/truba.jpg"; 
+coinImage.src = "resources/coin.png";
+
+// Обработчики сложности
+difficultyButtons.forEach(button => {
+  button.addEventListener("click", () => {
+    difficulty = button.getAttribute("data-diff");
+    startScreen.style.display = "none";
+    loadBirdSkin();
+    resetGame();
+    updateGame();
+  });
+});
+
+// Обработчики выбора скина
+const skinOptions = document.querySelectorAll(".skin-option");
+skinOptions.forEach(option => {
+  option.addEventListener("click", () => {
+    selectedSkin = parseInt(option.getAttribute("data-skin"));
+    skinOptions.forEach(o => o.style.borderColor = "#888");
+    option.style.borderColor = "#00ffff";
+  });
+});
+
+// ФУНКЦИИ ОТРИСОВКИ
+
+// Отрисовывает анимированный фон
+function drawBackground() {
+  ctx.drawImage(background, bgX, 0, canvas.width, canvas.height);
+  ctx.drawImage(background, bgX + canvas.width, 0, canvas.width, canvas.height);
+}
+
+// Отрисовывает птицу с учетом ее текущего поворота
+function drawBird() {
+  if (!birdImageLoaded) return;
+  
+  ctx.save();
+  ctx.translate(bird.x + bird.width / 2, bird.y + bird.height / 2);
+  
+  // Плавный поворот птицы в зависимости от скорости
+  if (smoothRotation) {
+    bird.targetRotation = Math.min(Math.max(bird.velocity / 15, -0.5), 0.5);
+    bird.rotation += (bird.targetRotation - bird.rotation) * rotationSpeed;
+  } else {
+    bird.rotation = Math.min(Math.max(bird.velocity / 15, -0.5), 0.5);
+  }
+  
+  ctx.rotate(bird.rotation);
+  ctx.drawImage(birdImage, -bird.width / 2, -bird.height / 2, bird.width, bird.height);
+  ctx.restore();
+}
+
+// Отрисовывает трубу с возможными бонусами
+function drawPipe(pipe) {
+  if (!pipeImageLoaded) return;
+
+  ctx.save();
+  // Верхняя труба
+  ctx.translate(pipe.x + pipe.width / 2, pipe.top);
+  ctx.scale(1, -1);
+  ctx.drawImage(pipeImage, -pipe.width / 2, 0, pipe.width, canvas.height);
+  ctx.restore();
+  
+  // Нижняя труба
+  ctx.drawImage(pipeImage, pipe.x, canvas.height - pipe.bottom, pipe.width, canvas.height);
+
+  // Бонусы
+  if (pipe.hasShield) {
+    drawShieldIcon(pipe.x + pipe.width / 2, pipe.shieldY);
+  }
+
+  if (pipe.hasCoin) {
+    drawCoin(pipe.x + pipe.width / 2, pipe.coinY);
+  }
+}
+
+// Отрисовывает иконку щита
+function drawShieldIcon(x, y) {
+  ctx.save();
+  const gradient = ctx.createRadialGradient(x, y, 5, x, y, 20);
+  gradient.addColorStop(0, 'rgba(0, 255, 255, 0.8)');
+  gradient.addColorStop(1, 'rgba(0, 100, 255, 0.2)');
+  
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(x, y, 20, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Анимация пульсации
+  const pulseSize = Math.sin(Date.now() / 200) * 3 + 20;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, pulseSize, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Отрисовывает монетку с анимацией
+function drawCoin(x, y) {
+  ctx.save();
+  const rotation = Date.now() / 150;
+  const pulse = Math.sin(Date.now() / 300) * 0.2 + 1;
+  
+  ctx.translate(x, y);
+  ctx.scale(pulse, pulse);
+  ctx.rotate(rotation);
+  
+  if (coinImageLoaded) {
+    ctx.drawImage(coinImage, -15, -15, 30, 30);
+  } else {
+    ctx.fillStyle = "#FFD700";
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Отрисовывает счет игрока
+function drawScore() {
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.beginPath();
+  ctx.roundRect(20, 20, 200, 80, [10, 10, 10, 10]);
+  ctx.fill();
+  
+  ctx.font = "bold 28px 'Orbitron', sans-serif";
+  const scoreGradient = ctx.createLinearGradient(0, 40, 0, 80);
+  scoreGradient.addColorStop(0, "#00FFFF");
+  scoreGradient.addColorStop(1, "#0088FF");
+  ctx.fillStyle = scoreGradient;
+  ctx.shadowColor = "rgba(0, 200, 255, 0.7)";
+  ctx.shadowBlur = 8;
+  ctx.textAlign = "left";
+  ctx.fillText(`ОЧКИ: ${score}`, 40, 60);
+  ctx.restore();
+}
+
+// Отрисовывает счетчик монет
+function drawCoinCounter() {
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.beginPath();
+  ctx.roundRect(canvas.width - 220, 20, 200, 80, [10, 10, 10, 10]);
+  ctx.fill();
+  
+  const coinX = canvas.width - 190;
+  const coinY = 60;
+  
+  // Отрисовка иконки монеты
+  if (coinImageLoaded) {
+    const coinScale = Math.sin(Date.now() / 300) * 0.1 + 0.9;
+    ctx.save();
+    ctx.translate(coinX, coinY);
+    ctx.scale(coinScale, coinScale);
+    ctx.drawImage(coinImage, -20, -20, 40, 40);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "#FFD700";
+    ctx.beginPath();
+    ctx.arc(coinX, coinY, 15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  // Отрисовка счетчика
+  ctx.font = "bold 26px 'Arial', sans-serif";
+  const coinGradient = ctx.createLinearGradient(0, 0, 0, 30);
+  coinGradient.addColorStop(0, "#FFD700");
+  coinGradient.addColorStop(1, "#FFA500");
+  ctx.fillStyle = coinGradient;
+  ctx.shadowColor = "rgba(255, 215, 0, 0.5)";
+  ctx.shadowBlur = 5;
+  ctx.textAlign = "left";
+  ctx.fillText(`${coinsCollected}/${COINS_FOR_BONUS}`, canvas.width - 150, 65);
+  
+  // Прогресс-бар
+  const progressWidth = 160 * (coinsCollected/COINS_FOR_BONUS);
+  ctx.fillStyle = "rgba(100, 100, 100, 0.3)";
+  ctx.fillRect(canvas.width - 190, 80, 160, 6);
+  
+  if (progressWidth > 0) {
+    ctx.fillStyle = "rgba(255, 215, 0, 0.8)";
+    ctx.fillRect(canvas.width - 190, 80, progressWidth, 6);
+  }
+  ctx.restore();
+}
+
+// Отрисовывает статус щита
+function drawShieldStatus() {
+  if (shieldTextScale > 1) shieldTextScale -= 0.05;
+  
+  ctx.save();
+  const shieldBoxWidth = 300;
+  const shieldBoxX = canvas.width/2 - shieldBoxWidth/2;
+  const shieldBoxY = canvas.height - 70;
+  
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.beginPath();
+  ctx.roundRect(shieldBoxX, shieldBoxY, shieldBoxWidth, 50, [10, 10, 10, 10]);
+  ctx.fill();
+  
+  const shieldX = shieldBoxX + 30;
+  const shieldY = shieldBoxY + 25;
+  
+  // Отрисовка иконки щита
+  if (shieldActive) {
+    const pulse = Math.sin(Date.now() / 200) * 0.1 + 0.9;
+    ctx.save();
+    ctx.translate(shieldX, shieldY);
+    ctx.scale(pulse, pulse);
+    
+    const gradient = ctx.createRadialGradient(0, 0, 5, 0, 0, 15);
+    gradient.addColorStop(0, "rgba(0, 255, 255, 0.9)");
+    gradient.addColorStop(1, "rgba(0, 100, 255, 0.3)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "rgba(100, 100, 100, 0.5)";
+    ctx.beginPath();
+    ctx.arc(shieldX, shieldY, 15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  // Отрисовка текста статуса
+  ctx.font = "bold 20px 'Arial', sans-serif";
+  ctx.textAlign = "left";
+  
+  if (shieldActive) {
+    const remaining = Math.ceil(shieldTime / 1000);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillText(`ЩИТ АКТИВЕН: ${remaining} сек`, shieldX + 30, shieldY + 8);
+  } else if (shieldCooldown > 0) {
+    const cooldown = Math.ceil(shieldCooldown / 1000);
+    ctx.fillStyle = "rgba(255, 150, 150, 0.9)";
+    ctx.fillText(`ПЕРЕЗАРЯДКА: ${cooldown} сек`, shieldX + 30, shieldY + 8);
+  } else {
+    ctx.fillStyle = "#00FFFF";
+    ctx.fillText("ЩИТ ГОТОВ", shieldX + 30, shieldY + 8);
+  }
+  
+  // Отрисовка прогресса перезарядки
+  if (shieldCooldown > 0 && !shieldActive) {
+    const cooldownWidth = 200 * (1 - shieldCooldown / SHIELD_COOLDOWN);
+    ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+    ctx.fillRect(shieldX + 30, shieldY + 15, 200, 4);
+    ctx.fillStyle = "rgba(255, 0, 0, 0.8)";
+    ctx.fillRect(shieldX + 30, shieldY + 15, cooldownWidth, 4);
+  }
+  ctx.restore();
+}
+
+// Отрисовывает щит вокруг птицы, если он активен
+function drawShield() {
+  if (shieldActive) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(bird.x + bird.width / 2, bird.y + bird.height / 2, bird.width + 15, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0, 255, 255, 0.7)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Отрисовывает все частицы эффектов
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  
+  trailParticles.forEach(p => {
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+// ИГРОВАЯ ЛОГИКА 
+
+// Сбрасывает игру в начальное состояние
+function resetGame() {
+  // Настройки сложности
+  switch (difficulty) {
+    case "easy":
+      gravity = 0.3;
+      pipeSpeed = 1.5;
+      pipeGap = 220;
+      pipeInterval = 150;
+      maxVelocity = 10;
+      rotationSpeed = 0.05;
+      break;
+    case "normal":
+      gravity = 0.4;
+      pipeSpeed = 2;
+      pipeGap = 180;
+      pipeInterval = 150;
+      maxVelocity = 12;
+      rotationSpeed = 0.1;
+      break;
+    case "hard":
+      gravity = 0.7;
+      pipeSpeed = 3;
+      pipeGap = 150;
+      pipeInterval = 90;
+      maxVelocity = 15;
+      rotationSpeed = 0.15;
+      break;
+    case "madness":
+      gravity = 1.0;
+      pipeSpeed = 4;
+      pipeGap = 120;
+      pipeInterval = 70;
+      maxVelocity = 20;
+      rotationSpeed = 0.2;
+      break;
+  }
+  
+  // Инициализация птицы
+  bird = {
+    x: 80,
+    y: canvas.height / 2,
+    width: 70,
+    height: 50,
+    velocity: 0,
+    jumpStrength: -10,
+    rotation: 0,
+    targetRotation: 0,
+    airResistance: 0.98,
+    flapPower: 0.7
+  };
+
+  // Сброс состояния игры
+  pipes = [];
+  particles = [];
+  trailParticles = [];
+  frameCount = 0;
+  isGameRunning = true;
+  score = 0;
+  coinsCollected = 0;
+  lastJumpTime = 0;
+  shieldActive = false;
+  shieldTime = 0;
+  shieldCooldown = 0;
+}
+
+// Создает новую трубу
+function createPipe() {
+  const minGap = pipeGap * 0.8;
+  const maxGap = pipeGap * 1.2;
+  const actualGap = Math.min(Math.max(pipeGap, minGap), maxGap);
+  const top = Math.random() * (canvas.height - actualGap - 100) + 20;
+  const bottom = canvas.height - (top + actualGap);
+  
+  const hasShield = Math.random() < 0.2;
+  const hasCoin = Math.random() < COIN_SPAWN_CHANCE;
+  
+  pipes.push({
+    x: canvas.width,
+    width: 60,
+    top,
+    bottom,
+    passed: false,
+    color: `hsl(${Math.random() * 60 + 180}, 80%, 50%)`,
+    hasShield,
+    shieldY: top + actualGap / 2,
+    hasCoin,
+    coinY: top + actualGap / 2 + (Math.random() * actualGap/2 - actualGap/4)
+  });
+}
+
+// Проверяет столкновение птицы с трубой
+function checkCollision(pipe) {
+  if (shieldActive) return false;
+
+  const birdCenterX = bird.x + bird.width / 2;
+  const birdCenterY = bird.y + bird.height / 2;
+  
+  // Проверка выхода за границы экрана
+  if (bird.y < 0 || bird.y + bird.height > canvas.height) {
+    return true;
+  }
+  
+  // Проверка столкновения с верхней трубой
+  const hitTop = birdCenterY - bird.height / 2 < pipe.top && 
+                birdCenterX + bird.width / 2 > pipe.x && 
+                birdCenterX - bird.width / 2 < pipe.x + pipe.width;
+                
+  // Проверка столкновения с нижней трубой
+  const hitBottom = birdCenterY + bird.height / 2 > canvas.height - pipe.bottom && 
+                   birdCenterX + bird.width / 2 > pipe.x && 
+                   birdCenterX - bird.width / 2 < pipe.x + pipe.width;
+  
+  return hitTop || hitBottom;
+}
+
+// Создает частицы следа за птицей
+function createTrailParticles() {
+  if (frameCount % 3 === 0) {
+    trailParticles.push({
+      x: bird.x + bird.width / 2,
+      y: bird.y + bird.height / 2,
+      size: Math.random() * 3 + 1,
+      color: `rgba(0, 255, 255, ${Math.random() * 0.5 + 0.3})`,
+      life: 20 + Math.random() * 10
+    });
+  }
+}
+
+// Обновляет состояние всех частиц
+function updateParticles() {
+  // Обновление обычных частиц
+  for (let i = particles.length - 1; i >= 0; i--) {
+    particles[i].x += particles[i].speedX;
+    particles[i].y += particles[i].speedY;
+    particles[i].life--;
+    if (particles[i].life <= 0) particles.splice(i, 1);
+  }
+  
+  // Обновление частиц следа
+  for (let i = trailParticles.length - 1; i >= 0; i--) {
+    trailParticles[i].y += 1;
+    trailParticles[i].life--;
+    if (trailParticles[i].life <= 0) trailParticles.splice(i, 1);
+  }
+}
+
+// Создает эффект взрыва при столкновении
+function createExplosion() {
+  for (let i = 0; i < 30; i++) {
+    particles.push({
+      x: bird.x + bird.width / 2,
+      y: bird.y + bird.height / 2,
+      size: Math.random() * 8 + 2,
+      color: `hsl(${Math.random() * 60 + 180}, 100%, 50%)`,
+      speedX: Math.random() * 10 - 5,
+      speedY: Math.random() * 10 - 5,
+      life: 40 + Math.random() * 20
+    });
+  }
+}
+
+// Создает эффект при сборе монетки
+function createCoinEffect(x, y) {
+  for (let i = 0; i < 15; i++) {
+    particles.push({
+      x: x,
+      y: y,
+      size: Math.random() * 4 + 2,
+      color: `hsl(${Math.random() * 30 + 40}, 100%, 50%)`,
+      speedX: Math.random() * 6 - 3,
+      speedY: Math.random() * 6 - 3,
+      life: 30 + Math.random() * 20
+    });
+  }
+}
+
+// Создает эффект бонуса при сборе достаточного количества монет
+function createBonusEffect() {
+  for (let i = 0; i < 30; i++) {
+    particles.push({
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      size: Math.random() * 8 + 3,
+      color: `hsl(${Math.random() * 60 + 40}, 100%, 50%)`,
+      speedX: Math.random() * 8 - 4,
+      speedY: Math.random() * 8 - 4,
+      life: 50 + Math.random() * 30
+    });
+  }
+}
+
+// Обрабатывает прыжок птицы
+function jump() {
+  jumpSound.currentTime = 0;
+  jumpSound.play();
+  if (!isGameRunning) return;
+  
+  // Проверка кулдауна
+  const now = Date.now();
+  if (now - lastJumpTime < jumpCooldown) return;
+  lastJumpTime = now;
+  
+  bird.velocity = bird.jumpStrength * bird.flapPower;
+  
+  // Создание частиц при прыжке
+  for (let i = 0; i < 5; i++) {
+    trailParticles.push({
+      x: bird.x + bird.width / 2,
+      y: bird.y + bird.height,
+      size: Math.random() * 4 + 2,
+      color: `rgba(0, 255, 255, ${Math.random() * 0.5 + 0.3})`,
+      speedX: Math.random() * 4 - 2,
+      speedY: -Math.random() * 3,
+      life: 15 + Math.random() * 10
+    });
+  }
+}
+
+// Активирует щит
+function activateShield() {
+  shieldSound.currentTime = 0;
+  shieldSound.play();  
+  if (shieldCooldown <= 0 && !shieldActive) {
+    shieldActive = true;
+    shieldTime = SHIELD_DURATION;
+    shieldTextScale = 1.5;
+    
+    // Создание эффекта активации щита
+    for (let i = 0; i < 30; i++) {
+      particles.push({
+        x: bird.x + bird.width / 2,
+        y: bird.y + bird.height / 2,
+        size: Math.random() * 8 + 2,
+        color: `hsla(${Math.random() * 60 + 180}, 100%, 50%, 0.7)`,
+        speedX: Math.random() * 6 - 3,
+        speedY: Math.random() * 6 - 3,
+        life: 40 + Math.random() * 20
+      });
+    }
+  }
+}
+
+// Завершает игру
+function endGame() {
+  isGameRunning = false;
+  document.getElementById("finalScore").textContent = score;
+  gameOverScreen.style.display = "flex";
+}
+
+//  ОСНОВНОЙ ИГРОВОЙ ЦИКЛ 
+
+// Основной игровой цикл
+function updateGame() {
+  if (!isGameRunning) return;
+
+  // Очистка экрана
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  frameCount++;
+  let deltaTime = 16;
+
+  // Анимация фона
+  bgX -= pipeSpeed;
+  if (bgX <= -canvas.width) bgX = 0;
+  drawBackground();
+
+  // Физика птицы
+  bird.velocity += gravity;
+  bird.velocity *= bird.airResistance;
+  
+  // Ограничение максимальной скорости
+  if (Math.abs(bird.velocity) > maxVelocity) {
+    bird.velocity = maxVelocity * Math.sign(bird.velocity);
+  }
+  
+  bird.y += bird.velocity;
+  
+  // Создание следа при падении
+  if (bird.velocity > 0) createTrailParticles();
+
+  // Создание новых труб
+  if (frameCount % pipeInterval === 0) createPipe();
+
+  // Обработка труб
+  for (let i = pipes.length - 1; i >= 0; i--) {
+    pipes[i].x -= pipeSpeed;
+    
+    // Удаление труб за пределами экрана
+    if (pipes[i].x + pipes[i].width < 0) {
+      pipes.splice(i, 1);
+      continue;
+    }
+
+    drawPipe(pipes[i]);
+
+    // Проверка прохождения трубы
+    if (!pipes[i].passed && pipes[i].x + pipes[i].width < bird.x) {
+      pipes[i].passed = true;
+      score++;
+    }
+
+    // Проверка сбора щита
+    if (pipes[i].hasShield) {
+      const shieldX = pipes[i].x + pipes[i].width / 2;
+      const shieldRadius = 20;
+      const birdCenterX = bird.x + bird.width / 2;
+      const birdCenterY = bird.y + bird.height / 2;
+      const dx = birdCenterX - shieldX;
+      const dy = birdCenterY - pipes[i].shieldY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance < shieldRadius + bird.width / 2) {
+        activateShield();
+        pipes[i].hasShield = false;
+      }
+    }
+
+    // Проверка сбора монетки
+    if (pipes[i].hasCoin && !pipes[i].passed) {
+      const coinX = pipes[i].x + pipes[i].width / 2;
+      const coinY = pipes[i].coinY;
+      const coinRadius = 15;
+      const dx = bird.x + bird.width/2 - coinX;
+      const dy = bird.y + bird.height/2 - coinY;
+      const distance = Math.sqrt(dx*dx + dy*dy);
+      
+      if (distance < bird.width/2 + coinRadius) {
+        pipes[i].hasCoin = false;
+        coinsCollected++;
+        coinSound.currentTime = 0;
+        coinSound.play();
+        createCoinEffect(coinX, coinY);
+        
+        // Проверка набора достаточного количества монет для бонуса
+        if (coinsCollected >= COINS_FOR_BONUS) {
+          score += 10;
+          coinsCollected = 0;
+          createBonusEffect();
+        }
+      }
+    }
+
+    // Проверка столкновения
+    if (checkCollision(pipes[i])) {
+      createExplosion();
+      endGame();
+      return;
+    }
+  }
+
+  // Обновление состояния щита
+  if (shieldActive) {
+    shieldTime -= 16;
+    if (shieldTime <= 0) {
+      shieldActive = false;
+      shieldCooldown = SHIELD_COOLDOWN;
+    }
+  }
+
+  // Обновление кулдауна щита
+  if (shieldCooldown > 0) {
+    shieldCooldown -= 16;
+  }
+
+  // Отрисовка всех элементов
+  drawBird();
+  drawShield();
+  drawScore();
+  drawCoinCounter();
+  drawShieldStatus();
+  updateParticles();
+  drawParticles();
+
+  // Запуск следующего кадра
+  requestAnimationFrame(updateGame);
+}
+
+//  ОБРАБОТЧИКИ СОБЫТИЙ 
+
+startBtn.onclick = () => {
+  difficultySelect.classList.add("show");
+  startBtn.style.display = "none";
+};
+
+restartBtn.onclick = () => {
+  gameOverScreen.style.display = "none";
+  resetGame();
+  updateGame();
+};
+
+// Обработка клавиатуры
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" || e.key === "ArrowUp") {
+    e.preventDefault();
+    jump();
+  }
+  if (e.key === "s" || e.key === "S") {
+    activateShield();
+  }
+});
+
+// Обработка кликов мыши
+canvas.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  jump();
+});
+
+// Обработка правого клика для активации щита
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  activateShield();
+});

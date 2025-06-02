@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Glitch Bird</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    h1.glitch {
+      font-family: 'Press Start 2P', cursive;
+      position: relative;
+      color: #0ff;
+      text-shadow: 2px 0 red, -2px 0 blue;
+      animation: glitch 1s infinite;
+      margin-bottom: 30px;
+    }
+
+    @keyframes glitch {
+      0% { text-shadow: 2px 0 red, -2px 0 blue; transform: translate(0); }
+      20% { text-shadow: -2px -2px red, 2px 2px blue; transform: translate(-2px, 2px); }
+      40% { text-shadow: 2px 2px red, -2px -2px blue; transform: translate(2px, -2px); }
+      60% { text-shadow: -2px 0 red, 2px 0 blue; transform: translate(-1px, 1px); }
+      80% { text-shadow: 0 2px red, 0 -2px blue; transform: translate(1px, -1px); }
+      100% { text-shadow: 2px 0 red, -2px 0 blue; transform: translate(0); }
+    }
+
+    .difficulty-btn {
+      font-family: 'Press Start 2P', cursive;
+      background: #111;
+      color: #0ff;
+      border: 2px solid #0ff;
+      padding: 12px 20px;
+      cursor: pointer;
+      margin: 8px 0;
+      width: 200px;
+      transition: all 0.3s ease;
+    }
+
+    .difficulty-btn:hover {
+      background: #0ff;
+      color: #000;
+      transform: scale(1.05);
+    }
+
+    /* Новые стили для уведомлений */
+    .achievement-notification, .mission-notification {
+      position: fixed;
+      top: 20px;
+      right: -400px;
+      width: 350px;
+      background: rgba(0, 0, 0, 0.8);
+      border: 2px solid #0ff;
+      border-radius: 5px;
+      padding: 15px;
+      color: #0ff;
+      font-family: 'Press Start 2P', cursive;
+      z-index: 1000;
+      transition: right 0.5s ease;
+    }
+
+    .achievement-notification.show, .mission-notification.show {
+      right: 20px;
+    }
+
+    .achievement-notification h3, .mission-notification h3 {
+      margin-top: 0;
+      color: #ff0;
+    }
+  </style>
+</head>
+<body>
+  <!-- Стартовый экран -->
+<div class="overlay" id="startScreen">
+  <div class="overlay-content">
+    <h1 class="glitch">Glitch Bird</h1>
+    <button id="startBtn">Старт</button>
+    <!-- Выбор уровня сложности -->
+    <div id="difficultySelect">
+      <div id="skinSelect" class="skin-select">
+        <h3>Выбери скин птицы:</h3>
+        <div class="skin-options">
+          <div class="skin-option" data-skin="1">
+            <img src="resourses/bird1.png" alt="Птица 1" class="skin-preview">
+        </div>
+        <div class="skin-option" data-skin="2">
+          <img src="resourses/bird2.png" alt="Птица 2" class="skin-preview">
+        </div>
+        <div class="skin-option" data-skin="3">
+          <img src="resourses/bird3.png" alt="Птица 3" class="skin-preview">
+        </div>
+      </div>
+    </div>
+      <p class="difficulty-text">Выбери уровень сложности:</p>
+      <button class="difficulty-btn" data-diff="easy">Лёгкий</button>
+      <button class="difficulty-btn" data-diff="normal">Обычный</button>
+      <button class="difficulty-btn" data-diff="hard">Хардкор</button>
+      <button class="difficulty-btn" data-diff="madness">Безумие</button>
+    </div>
+  </div>
+</div>
+
+  <!-- Игровое поле -->
+  <canvas id="gameCanvas" width="600" height="800"></canvas>
+
+  <!-- Экран проигрыша -->
+  <div class="overlay" id="gameOverScreen" style="display: none;">
+    <div class="overlay-content">
+      <h1>Вы проиграли</h1>
+      <p class="final-score">Ваш счёт: <span id="finalScore">0</span></p>
+      <button id="restartBtn">Начать заново</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
